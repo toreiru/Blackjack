@@ -98,7 +98,7 @@ io.on('connection', (socket) => {
                 const [oldSocketId] = oldSession;
                 io.to(oldSocketId).emit('server_message', { message: 'Sesión iniciada en otro dispositivo. Desconectando...' });
                 io.in(oldSocketId).disconnectSockets(true);
-                t.removePlayer(oldSocketId);
+                t.removePlayer(oldSocketId, () => broadcastTableState(t.id));
                 broadcastTableState(t.id);
             }
         }
@@ -237,7 +237,7 @@ io.on('connection', (socket) => {
     socket.on('leave_table', () => {
         const table = getTableForSocket(socket.id);
         if (table) {
-            table.removePlayer(socket.id);
+            table.removePlayer(socket.id, () => broadcastTableState(table.id));
             socket.leave(table.id);
             socket.emit('server_message', { message: 'Has salido de la mesa.' });
             broadcastTableState(table.id);
@@ -248,7 +248,7 @@ io.on('connection', (socket) => {
         console.log(`Usuario desconectado: ${socket.id}`);
         const table = getTableForSocket(socket.id);
         if (table) {
-            table.removePlayer(socket.id);
+            table.removePlayer(socket.id, () => broadcastTableState(table.id));
             broadcastTableState(table.id);
         }
     });

@@ -37,11 +37,13 @@ export class BlackjackTable {
         return true;
     }
 
-    public removePlayer(socketId: string) {
+    public removePlayer(socketId: string, broadcastFn?: () => void) {
         this.players.delete(socketId);
         if (this.players.size === 0) {
             this.resetTable();
             this.deck = new Deck(6); // Replenish shoe when table empties
+        } else if (this.state === 'playing') {
+            this.skipCompletedTurns(broadcastFn);
         }
     }
 
@@ -78,7 +80,8 @@ export class BlackjackTable {
         // Deal 2 cards to each player sequentially
         for (let i = 0; i < 2; i++) {
             for (const socketId of this.playerTurnOrder) {
-                const player = this.players.get(socketId)!;
+                const player = this.players.get(socketId);
+                if (!player) continue;
                 player.hand.addCard(this.deck.draw());
                 broadcastFn();
                 await sleep(800); // UI deal animation delay
@@ -108,7 +111,7 @@ export class BlackjackTable {
             const currentSocketId = this.playerTurnOrder[this.currentPlayerTurnIndex];
             const player = this.players.get(currentSocketId);
 
-            if (player && (player.hand.status === 'blackjack' || player.hand.isBusted())) {
+            if (!player || player.hand.status === 'blackjack' || player.hand.isBusted()) {
                 this.currentPlayerTurnIndex++;
                 changed = true;
             } else {
