@@ -1,19 +1,18 @@
 import express from 'express';
-import { PrismaClient } from '@prisma/client';
+import db from '../db';
 import { authenticateToken } from '../middleware/auth';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Middleware inside the route to check for Admin/Promoter role
 const requireDbRole = (roles: string[]) => {
     return async (req: any, res: any, next: any) => {
         try {
-            const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-            if (!user || !roles.includes(user.role)) {
+            const userRes = await db.query('SELECT * FROM "User" WHERE id = $1', [req.user.id]);
+            if (userRes.rows.length === 0 || !roles.includes(userRes.rows[0].role)) {
                 return res.status(403).json({ error: 'Acceso denegado. Permisos insuficientes.' });
             }
-            req.dbUser = user; // Attach full user object
+            req.dbUser = userRes.rows[0]; // Attach full user object
             next();
         } catch (error) {
             res.status(500).json({ error: 'Error verificando permisos' });
@@ -28,10 +27,8 @@ const requireDbRole = (roles: string[]) => {
 // 1. Get all users (Search)
 router.get('/users', authenticateToken, requireDbRole(['ADMIN']), async (req: any, res: any) => {
     try {
-        const users = await prisma.user.findMany({
-            select: { id: true, username: true, role: true, coins: true, whatsapp: true, createdAt: true }
-        });
-        res.json(users);
+        const usersRes = await db.query('SELECT id, username, role, coins, whatsapp, "createdAt" FROM "User"');
+        res.json(usersRes.rows);
     } catch (error) {
         res.status(500).json({ error: 'Error obteniendo usuarios' });
     }
@@ -49,14 +46,24 @@ router.post('/change-role', authenticateToken, requireDbRole(['ADMIN']), async (
             return res.status(400).json({ error: 'Se requiere número de WhatsApp para asignar rol de Promotor' });
         }
 
-        const updatedUser = await prisma.user.update({
-            where: { id: targetUserId },
-            data: {
-                role: newRole,
-                ...(whatsapp ? { whatsapp } : {})
-            }
-        });
-        res.json({ message: `Rol actualizado a ${newRole} para ${updatedUser.username}` });
+        let queryStr = 'UPDATE "User" SET role = $1';
+        let params: any[] = [newRole];
+
+        if (whatsapp) {
+            queryStr += ', whatsapp = $2';
+            params.push(whatsapp);
+        }
+
+        queryStr += ` WHERE id = $${params.length + 1} RETURNING username`;
+        params.push(targetUserId);
+
+        const updateRes = await db.query(queryStr, params);
+
+        if (updateRes.rows.length > 0) {
+            res.json({ message: `Rol actualizado a ${newRole} para ${updateRes.rows[0].username}` });
+        } else {
+            res.status(404).json({ error: 'Usuario no encontrado' });
+        }
     } catch (error) {
         res.status(500).json({ error: 'Error cambiando rol' });
     }
@@ -68,20 +75,28 @@ router.post('/mint', authenticateToken, requireDbRole(['ADMIN']), async (req: an
     try {
         if (amount <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
-        const updatedAdmin = await prisma.user.update({
-            where: { id: req.dbUser.id },
-            data: { coins: { increment: amount } }
-        });
+        const client = await db.pool.connect();
+        try {
+            await client.query('BEGIN');
 
-        await prisma.transaction.create({
-            data: {
-                amount,
-                type: 'BONUS',
-                receiverId: req.dbUser.id
-            }
-        });
+            const adminUpdate = await client.query(
+                'UPDATE "User" SET coins = coins + $1 WHERE id = $2 RETURNING coins',
+                [amount, req.dbUser.id]
+            );
 
-        res.json({ message: `¡Se minaron ${amount} monedas exitosamente!`, newBalance: updatedAdmin.coins });
+            await client.query(
+                'INSERT INTO "Transaction" (amount, type, "receiverId") VALUES ($1, $2, $3)',
+                [amount, 'BONUS', req.dbUser.id]
+            );
+
+            await client.query('COMMIT');
+            res.json({ message: `¡Se minaron ${amount} monedas exitosamente!`, newBalance: adminUpdate.rows[0].coins });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
     } catch (error) {
         res.status(500).json({ error: 'Error minando monedas' });
     }
@@ -95,11 +110,8 @@ router.post('/mint', authenticateToken, requireDbRole(['ADMIN']), async (req: an
 // Get active promoters for players to contact
 router.get('/promoters', authenticateToken, async (req: any, res: any) => {
     try {
-        const promoters = await prisma.user.findMany({
-            where: { role: 'PROMOTER', whatsapp: { not: null } },
-            select: { id: true, username: true, whatsapp: true }
-        });
-        res.json(promoters);
+        const promotersRes = await db.query('SELECT id, username, whatsapp FROM "User" WHERE role = $1 AND whatsapp IS NOT NULL', ['PROMOTER']);
+        res.json(promotersRes.rows);
     } catch (error) {
         res.status(500).json({ error: 'Error obteniendo promotores' });
     }
@@ -117,64 +129,64 @@ router.post('/transfer', authenticateToken, requireDbRole(['ADMIN', 'PROMOTER'])
             return res.status(400).json({ error: 'Saldo insuficiente' });
         }
 
-        const receiver = await prisma.user.findUnique({
-            where: { username: receiverUsername },
-            include: { referredBy: true }
-        });
+        const client = await db.pool.connect();
+        try {
+            await client.query('BEGIN');
 
-        if (!receiver) {
-            return res.status(404).json({ error: 'Usuario receptor no encontrado' });
-        }
+            const receiverRes = await client.query('SELECT id, username, "referredById" FROM "User" WHERE username = $1', [receiverUsername]);
 
-        const transactionOperations: any[] = [
-            prisma.user.update({
-                where: { id: sender.id },
-                data: { coins: { decrement: amount } }
-            }),
-            prisma.user.update({
-                where: { id: receiver.id },
-                data: { coins: { increment: amount } }
-            }),
-            prisma.transaction.create({
-                data: {
-                    amount,
-                    type: 'TRANSFER',
-                    senderId: sender.id,
-                    receiverId: receiver.id
+            if (receiverRes.rows.length === 0) {
+                await client.query('ROLLBACK');
+                client.release();
+                return res.status(404).json({ error: 'Usuario receptor no encontrado' });
+            }
+
+            const receiver = receiverRes.rows[0];
+
+            // Update balances
+            await client.query('UPDATE "User" SET coins = coins - $1 WHERE id = $2', [amount, sender.id]);
+            await client.query('UPDATE "User" SET coins = coins + $1 WHERE id = $2', [amount, receiver.id]);
+
+            // Create transfer transaction
+            await client.query(
+                'INSERT INTO "Transaction" (amount, type, "senderId", "receiverId") VALUES ($1, $2, $3, $4)',
+                [amount, 'TRANSFER', sender.id, receiver.id]
+            );
+
+            // Process 20% Referral Commission Bonus
+            let bonusAmount = 0;
+            let referredByUsername = null;
+            if (receiver.referredById) {
+                bonusAmount = amount * 0.20;
+
+                const bonusReceiverRes = await client.query(
+                    'UPDATE "User" SET coins = coins + $1 WHERE id = $2 RETURNING username',
+                    [bonusAmount, receiver.referredById]
+                );
+
+                if (bonusReceiverRes.rows.length > 0) {
+                    referredByUsername = bonusReceiverRes.rows[0].username;
+                    await client.query(
+                        'INSERT INTO "Transaction" (amount, type, "receiverId") VALUES ($1, $2, $3)',
+                        [bonusAmount, 'BONUS', receiver.referredById]
+                    );
                 }
-            })
-        ];
+            }
 
-        // Process 20% Referral Commission Bonus injected by the system (not deducted from sender/receiver)
-        let bonusAmount = 0;
-        if (receiver.referredBy) {
-            bonusAmount = amount * 0.20;
-            transactionOperations.push(
-                prisma.user.update({
-                    where: { id: receiver.referredBy.id },
-                    data: { coins: { increment: bonusAmount } }
-                })
-            );
-            transactionOperations.push(
-                prisma.transaction.create({
-                    data: {
-                        amount: bonusAmount,
-                        type: 'BONUS',
-                        receiverId: receiver.referredBy.id
-                    }
-                })
-            );
+            await client.query('COMMIT');
+
+            let msg = `Transferencia de ${amount} monedas a ${receiver.username} exitosa.`;
+            if (bonusAmount > 0 && referredByUsername) {
+                msg += ` El usuario ${referredByUsername} recibió ${bonusAmount} monedas de bono por referido.`;
+            }
+
+            res.json({ message: msg });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
         }
-
-        // Execute all database updates atomically
-        await prisma.$transaction(transactionOperations);
-
-        let msg = `Transferencia de ${amount} monedas a ${receiver.username} exitosa.`;
-        if (bonusAmount > 0) {
-            msg += ` El usuario ${receiver.referredBy!.username} recibió ${bonusAmount} monedas de bono por referido.`;
-        }
-
-        res.json({ message: msg });
     } catch (error) {
         res.status(500).json({ error: 'Error en la transferencia' });
     }

@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import db from '../db';
 import crypto from 'crypto';
 
-const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret'; // In production, never fallback
 
 export const register = async (req: Request, res: Response) => {
@@ -12,8 +11,8 @@ export const register = async (req: Request, res: Response) => {
 
     try {
         // Check if user exists
-        const existingUser = await prisma.user.findUnique({ where: { username } });
-        if (existingUser) {
+        const existingUserRes = await db.query('SELECT username FROM "User" WHERE username = $1', [username]);
+        if (existingUserRes.rows.length > 0) {
             return res.status(400).json({ error: 'Username already taken.' });
         }
 
@@ -26,23 +25,20 @@ export const register = async (req: Request, res: Response) => {
         // Check if player used a referral code
         let referredById = null;
         if (referralCode) {
-            const referrer = await prisma.user.findUnique({ where: { referralCode } });
-            if (referrer) {
-                referredById = referrer.id;
+            const referrerRes = await db.query('SELECT id FROM "User" WHERE "referralCode" = $1', [referralCode]);
+            if (referrerRes.rows.length > 0) {
+                referredById = referrerRes.rows[0].id;
             }
         }
 
         // Role is PLAYER by default
-        const user = await prisma.user.create({
-            data: {
-                username,
-                password: hashedPassword,
-                referralCode: newReferralCode,
-                referredById
-            }
-        });
+        const insertUserRes = await db.query(
+            'INSERT INTO "User" (username, password, "referralCode", "referredById") VALUES ($1, $2, $3, $4) RETURNING id',
+            [username, hashedPassword, newReferralCode, referredById]
+        );
+        const userId = insertUserRes.rows[0].id;
 
-        res.status(201).json({ message: 'User created successfully', userId: user.id });
+        res.status(201).json({ message: 'User created successfully', userId });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error creating user' });
@@ -53,11 +49,13 @@ export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body;
 
     try {
-        const user = await prisma.user.findUnique({ where: { username } });
+        const userRes = await db.query('SELECT * FROM "User" WHERE username = $1', [username]);
 
-        if (!user) {
+        if (userRes.rows.length === 0) {
             return res.status(400).json({ error: 'Invalid credentials' });
         }
+
+        const user = userRes.rows[0];
 
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
@@ -89,11 +87,11 @@ export const login = async (req: Request, res: Response) => {
 
 export const getProfile = async (req: any, res: Response) => {
     try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            select: { id: true, username: true, role: true, coins: true, referralCode: true, createdAt: true }
-        });
-        res.json(user);
+        const userRes = await db.query(
+            'SELECT id, username, role, coins, "referralCode", "createdAt" FROM "User" WHERE id = $1',
+            [req.user.id]
+        );
+        res.json(userRes.rows[0]);
     } catch (error) {
         res.status(500).json({ error: 'Error fetching profile' });
     }

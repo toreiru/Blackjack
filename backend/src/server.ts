@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import db, { initializeDatabase } from './db';
 
 dotenv.config();
 
@@ -19,8 +19,6 @@ const io = new Server(server, {
         methods: ['GET', 'POST']
     }
 });
-
-const prisma = new PrismaClient();
 
 app.use(cors());
 app.use(express.json());
@@ -65,13 +63,15 @@ const createTable = (id: string) => {
     table.onRoundEnded = async (results) => {
         for (const res of results) {
             try {
-                const updatedUser = await prisma.user.update({
-                    where: { id: res.userId },
-                    data: { coins: { increment: res.payout } }
-                });
-                table.players.forEach(p => {
-                    if (p.userId === res.userId) p.coins = updatedUser.coins;
-                });
+                const updateRes = await db.query(
+                    'UPDATE "User" SET coins = coins + $1 WHERE id = $2 RETURNING coins',
+                    [res.payout, res.userId]
+                );
+                if (updateRes.rows.length > 0) {
+                    table.players.forEach(p => {
+                        if (p.userId === res.userId) p.coins = updateRes.rows[0].coins;
+                    });
+                }
             } catch (e) { console.error('Error updating payout:', e); }
         }
         broadcastTableState(id);
@@ -107,8 +107,9 @@ io.on('connection', (socket) => {
     // Join quick public match
     socket.on('join_quick_match', async (data: { userId: number }) => {
         try {
-            const user = await prisma.user.findUnique({ where: { id: data.userId } });
-            if (!user) return;
+            const userRes = await db.query('SELECT * FROM "User" WHERE id = $1', [data.userId]);
+            if (userRes.rows.length === 0) return;
+            const user = userRes.rows[0];
 
             kickExistingSession(user.id);
 
@@ -128,8 +129,9 @@ io.on('connection', (socket) => {
     // Create private match
     socket.on('create_private_match', async (data: { userId: number }) => {
         try {
-            const user = await prisma.user.findUnique({ where: { id: data.userId } });
-            if (!user) return;
+            const userRes = await db.query('SELECT * FROM "User" WHERE id = $1', [data.userId]);
+            if (userRes.rows.length === 0) return;
+            const user = userRes.rows[0];
 
             kickExistingSession(user.id);
 
@@ -148,8 +150,9 @@ io.on('connection', (socket) => {
     // Join private match
     socket.on('join_private_match', async (data: { userId: number, tableId: string }) => {
         try {
-            const user = await prisma.user.findUnique({ where: { id: data.userId } });
-            if (!user) return;
+            const userRes = await db.query('SELECT * FROM "User" WHERE id = $1', [data.userId]);
+            if (userRes.rows.length === 0) return;
+            const user = userRes.rows[0];
 
             kickExistingSession(user.id);
 
@@ -195,16 +198,13 @@ io.on('connection', (socket) => {
         if (!player) return;
 
         try {
-            const user = await prisma.user.findUnique({ where: { id: player.userId } });
-            if (!user || user.coins < data.amount) {
+            const userRes = await db.query('SELECT * FROM "User" WHERE id = $1', [player.userId]);
+            if (userRes.rows.length === 0 || userRes.rows[0].coins < data.amount) {
                 socket.emit('server_message', { message: 'Saldo insuficiente' });
                 return;
             }
 
-            await prisma.user.update({
-                where: { id: player.userId },
-                data: { coins: { decrement: data.amount } }
-            });
+            await db.query('UPDATE "User" SET coins = coins - $1 WHERE id = $2', [data.amount, player.userId]);
             player.coins -= data.amount;
 
             if (table.placeBet(socket.id, data.amount)) {
@@ -214,10 +214,7 @@ io.on('connection', (socket) => {
                 broadcastTableState(table.id);
             } else {
                 socket.emit('server_message', { message: 'No puedes apostar ahora' });
-                await prisma.user.update({
-                    where: { id: player.userId },
-                    data: { coins: { increment: data.amount } }
-                });
+                await db.query('UPDATE "User" SET coins = coins + $1 WHERE id = $2', [data.amount, player.userId]);
                 player.coins += data.amount;
             }
         } catch (e) { console.error(e); }
@@ -266,34 +263,38 @@ const PORT = process.env.PORT || 3001;
 server.listen(Number(PORT), '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT} across all local networks`);
 
+    // Initialize PostgreSQL Database Tables
+    try {
+        await initializeDatabase();
+    } catch (err) {
+        console.error('Failed to initialize database, terminating...');
+        process.exit(1);
+    }
+
     // Auto-create Admin User if it doesn't exist
     try {
         const username = 'vonToreiru';
         const password = 'Molin@gt27!';
 
-        const existingAdmin = await prisma.user.findUnique({ where: { username } });
+        const existingAdminRes = await db.query('SELECT id, role FROM "User" WHERE username = $1', [username]);
 
-        if (!existingAdmin) {
+        if (existingAdminRes.rows.length === 0) {
             const hashedPassword = await bcrypt.hash(password, 10);
             const referralCode = crypto.randomBytes(4).toString('hex').toUpperCase();
 
-            await prisma.user.create({
-                data: {
-                    username,
-                    password: hashedPassword,
-                    role: 'ADMIN',
-                    coins: 1000000,
-                    referralCode
-                }
-            });
+            await db.query(`
+                INSERT INTO "User" (username, password, role, coins, "referralCode") 
+                VALUES ($1, $2, 'ADMIN', 1000000, $3)`,
+                [username, hashedPassword, referralCode]
+            );
             console.log(`[Auto-Config] Admin user ${username} created successfully.`);
-        } else if (existingAdmin.role !== 'ADMIN') {
+        } else if (existingAdminRes.rows[0].role !== 'ADMIN') {
             // In case it exists but lost admin privileges
             const hashedPassword = await bcrypt.hash(password, 10);
-            await prisma.user.update({
-                where: { id: existingAdmin.id },
-                data: { role: 'ADMIN', password: hashedPassword }
-            });
+            await db.query(
+                `UPDATE "User" SET role = 'ADMIN', password = $1 WHERE id = $2`,
+                [hashedPassword, existingAdminRes.rows[0].id]
+            );
             console.log(`[Auto-Config] User ${username} updated to ADMIN role.`);
         } else {
             console.log(`[Auto-Config] Admin user already exists.`);
