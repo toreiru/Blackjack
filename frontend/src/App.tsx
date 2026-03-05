@@ -178,15 +178,15 @@ function App() {
                     <div className="balance">
                         <span><CoinIcon /> {user.coins} Monedas</span>
                     </div>
-                    <button onClick={() => setCurrentView(currentView === 'friends' ? 'table' : 'friends')} className="btn" style={{ background: '#444' }}>
-                        {currentView === 'friends' ? 'Volver a Mesa' : 'Amigos'}
+                    <button onClick={() => setCurrentView(currentView === 'friends' ? (table ? 'table' : 'lobby') : 'friends')} className="btn" style={{ background: '#444' }}>
+                        {currentView === 'friends' ? (table ? 'Volver a Mesa' : 'Volver al Lobby') : 'Amigos'}
                     </button>
-                    <button onClick={() => setCurrentView(currentView === 'recharge' ? 'table' : 'recharge')} className="btn" style={{ background: 'var(--retro-green)', borderColor: 'var(--retro-green)' }}>
-                        {currentView === 'recharge' ? 'Volver a Mesa' : 'Recargas / Retiros'}
+                    <button onClick={() => setCurrentView(currentView === 'recharge' ? (table ? 'table' : 'lobby') : 'recharge')} className="btn" style={{ background: 'var(--retro-green)', borderColor: 'var(--retro-green)' }}>
+                        {currentView === 'recharge' ? (table ? 'Volver a Mesa' : 'Volver al Lobby') : 'Recargas / Retiros'}
                     </button>
                     {(user.role === 'ADMIN' || user.role === 'PROMOTER') && (
-                        <button onClick={() => setCurrentView(currentView === 'dashboard' ? 'table' : 'dashboard')} className="btn" style={{ background: '#333' }}>
-                            {currentView === 'dashboard' ? 'Volver a Mesa' : 'Panel de Control'}
+                        <button onClick={() => setCurrentView(currentView === 'dashboard' ? (table ? 'table' : 'lobby') : 'dashboard')} className="btn" style={{ background: '#333' }}>
+                            {currentView === 'dashboard' ? (table ? 'Volver a Mesa' : 'Volver al Lobby') : 'Panel de Control'}
                         </button>
                     )}
                     <button onClick={toggleMute} className="btn" style={{ padding: '0.4rem 0.8rem', background: '#222', borderColor: '#444' }} title="Música de Fondo">
@@ -251,7 +251,7 @@ function App() {
                 <Dashboard
                     token={token}
                     user={user}
-                    onBack={() => setCurrentView('table')}
+                    onBack={() => setCurrentView(table ? 'table' : 'lobby')}
                     onUpdateCoins={(newBalance) => setUser({ ...user, coins: newBalance })}
                 />
             ) : (
