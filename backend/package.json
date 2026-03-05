@@ -4,8 +4,8 @@
     "main": "src/server.ts",
     "scripts": {
         "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-        "build": "tsc",
-        "start": "npx prisma generate && npx prisma db push --accept-data-loss && node dist/server.js"
+        "build": "tsc && node_modules/.bin/prisma generate && node_modules/.bin/prisma db push --accept-data-loss",
+        "start": "node dist/server.js"
     },
     "dependencies": {
         "@prisma/client": "^5.0.0",
