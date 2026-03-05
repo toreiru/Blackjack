@@ -110,7 +110,7 @@ export const Friends: React.FC<FriendsProps> = ({ token, socket, table, invites,
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                         {invites.map((invite, idx) => (
                             <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid #004400' }}>
-                                <span><span style={{ color: 'var(--retro-green)' }}>{invite.senderName}</span> te invita a la mesa <span style={{ color: 'var(--gold)' }}>{invite.tableCode}</span></span>
+                                <span><span style={{ color: 'var(--retro-green)' }}>{invite.senderName}</span> te invita a su mesa privada.</span>
                                 <button className="btn" style={{ background: 'var(--gold)', color: '#000', padding: '5px 10px', fontSize: '0.7rem' }} onClick={() => onJoinPrivateMatch(invite.tableCode)}>Unirse</button>
                             </li>
                         ))}
