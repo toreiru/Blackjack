@@ -3,20 +3,21 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 export const query = (text: string, params?: any[]) => {
-    return pool.query(text, params);
+  return pool.query(text, params);
 };
 
 export const initializeDatabase = async () => {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-        // Users Table
-        await client.query(`
+    // Users Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS "User" (
         "id" SERIAL PRIMARY KEY,
         "username" TEXT UNIQUE NOT NULL,
@@ -31,8 +32,8 @@ export const initializeDatabase = async () => {
       );
     `);
 
-        // Friendships Table
-        await client.query(`
+    // Friendships Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS "Friendship" (
         "id" SERIAL PRIMARY KEY,
         "requesterId" INTEGER NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
@@ -44,8 +45,8 @@ export const initializeDatabase = async () => {
       );
     `);
 
-        // Transactions Table
-        await client.query(`
+    // Transactions Table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS "Transaction" (
         "id" SERIAL PRIMARY KEY,
         "amount" DOUBLE PRECISION NOT NULL,
@@ -56,19 +57,19 @@ export const initializeDatabase = async () => {
       );
     `);
 
-        await client.query('COMMIT');
-        console.log('Database tables initialized successfully.');
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('Error initializing database tables:', error);
-        throw error;
-    } finally {
-        client.release();
-    }
+    await client.query('COMMIT');
+    console.log('Database tables initialized successfully.');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error initializing database tables:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 export default {
-    query,
-    pool,
-    initializeDatabase,
+  query,
+  pool,
+  initializeDatabase,
 };
