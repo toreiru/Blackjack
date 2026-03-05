@@ -267,7 +267,7 @@ server.listen(Number(PORT), '0.0.0.0', async () => {
     try {
         await initializeDatabase();
     } catch (err) {
-        console.error('Failed to initialize database, terminating...');
+        console.error('Failed to initialize database, terminating...', err);
         process.exit(1);
     }
 

@@ -12,7 +12,15 @@ export const query = (text: string, params?: any[]) => {
 };
 
 export const initializeDatabase = async () => {
-  const client = await pool.connect();
+  console.log('Initializing database connection...');
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    console.error('Failed to acquire client from connection pool:', err);
+    throw err;
+  }
+
   try {
     await client.query('BEGIN');
 
