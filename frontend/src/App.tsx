@@ -52,29 +52,33 @@ function App() {
 
     // Connect socket only when logged in
     useEffect(() => {
+        let currentSocket: Socket | null = null;
         if (user?.id) {
-            const newSocket = io(import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`);
-            setSocket(newSocket);
+            import('./services/api').then(({ BASE_URL }) => {
+                const newSocket = io(BASE_URL);
+                currentSocket = newSocket;
+                setSocket(newSocket);
 
-            newSocket.on('connect', () => {
-                setMessages(prev => [...prev.slice(-4), 'Conectado al servidor']);
-            });
+                newSocket.on('connect', () => {
+                    setMessages(prev => [...prev.slice(-4), 'Conectado al servidor']);
+                });
 
-            newSocket.on('server_message', (data) => {
-                setMessages(prev => [...prev.slice(-4), data.message]);
-            });
+                newSocket.on('server_message', (data) => {
+                    setMessages(prev => [...prev.slice(-4), data.message]);
+                });
 
-            newSocket.on('table_update', (newTableState) => {
-                setTable(newTableState);
-                setCurrentView(prev => prev === 'lobby' ? 'table' : prev);
-                const socketId = newSocket.id;
-                if (typeof socketId === 'string' && newTableState.players[socketId]) {
-                    setUser((prev: any) => prev ? { ...prev, coins: newTableState.players[socketId].coins } : prev);
-                }
+                newSocket.on('table_update', (newTableState) => {
+                    setTable(newTableState);
+                    setCurrentView(prev => prev === 'lobby' ? 'table' : prev);
+                    const socketId = newSocket.id;
+                    if (typeof socketId === 'string' && newTableState.players[socketId]) {
+                        setUser((prev: any) => prev ? { ...prev, coins: newTableState.players[socketId].coins } : prev);
+                    }
+                });
             });
 
             return () => {
-                newSocket.disconnect();
+                if (currentSocket) currentSocket.disconnect();
             };
         }
     }, [user?.id]);
