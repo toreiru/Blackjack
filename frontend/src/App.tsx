@@ -193,7 +193,7 @@ function App() {
                         <VolumeIcon isMuted={isMuted} />
                     </button>
                     {currentView === 'table' && table ? (
-                        <button onClick={handleLeaveTable} className="btn" style={{ background: 'var(--retro-red)', color: 'white', borderColor: 'var(--retro-red)' }}>Abandonar</button>
+                        <button onClick={handleLeaveTable} className="btn" style={{ background: 'var(--retro-red)', color: 'white', borderColor: 'var(--retro-red)' }}>Volver al Lobby</button>
                     ) : (
                         <button onClick={handleLogout} className="btn-logout">Salir</button>
                     )}
@@ -388,7 +388,7 @@ function App() {
                                             )}
                                         </div>
                                         <div style={{ marginTop: '2rem' }}>
-                                            <button className="btn-logout" onClick={() => socket?.emit('leave_table')}>Salirse de la mesa</button>
+                                            <button className="btn-logout" onClick={handleLeaveTable}>Volver al Lobby</button>
                                         </div>
                                     </>
                                 ) : (
@@ -397,6 +397,7 @@ function App() {
                                             Estás visualizando la mesa.<br />
                                             Los asientos pueden estar llenos o no has entrado aún.
                                         </div>
+                                        <button className="btn-logout" onClick={handleLeaveTable} style={{ marginTop: '1rem' }}>Volver al Lobby</button>
                                     </div>
                                 )}
                             </div>
