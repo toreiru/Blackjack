@@ -37,6 +37,10 @@ function App() {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [promoters, setPromoters] = useState<any[]>([]);
 
+    // Invites state
+    const [hasNewInvite, setHasNewInvite] = useState(false);
+    const [invites, setInvites] = useState<{ senderName: string, tableCode: string }[]>([]);
+
     // Authenticate user on load if token exists
     useEffect(() => {
         if (token) {
@@ -61,10 +65,17 @@ function App() {
 
                 newSocket.on('connect', () => {
                     setMessages(prev => [...prev.slice(-4), 'Conectado al servidor']);
+                    newSocket.emit('authenticate', { userId: user.id });
                 });
 
                 newSocket.on('server_message', (data) => {
                     setMessages(prev => [...prev.slice(-4), data.message]);
+                });
+
+                newSocket.on('receive_invite', (data: { senderName: string, tableCode: string }) => {
+                    setInvites(prev => [...prev, data]);
+                    setHasNewInvite(true);
+                    setMessages(prev => [...prev.slice(-4), `¡${data.senderName} te ha invitado a su mesa! (Revisa Amigos)`]);
                 });
 
                 newSocket.on('table_update', (newTableState) => {
@@ -178,7 +189,18 @@ function App() {
                     <div className="balance">
                         <span><CoinIcon /> {user.coins} Monedas</span>
                     </div>
-                    <button onClick={() => setCurrentView(currentView === 'friends' ? (table ? 'table' : 'lobby') : 'friends')} className="btn" style={{ background: '#444' }}>
+                    <button
+                        onClick={() => {
+                            setHasNewInvite(false);
+                            setCurrentView(currentView === 'friends' ? (table ? 'table' : 'lobby') : 'friends');
+                        }}
+                        className="btn"
+                        style={{
+                            background: '#444',
+                            animation: hasNewInvite ? 'blinkWhite 1s infinite' : 'none',
+                            color: hasNewInvite ? '#000' : '#fff'
+                        }}
+                    >
                         {currentView === 'friends' ? (table ? 'Volver a Mesa' : 'Volver al Lobby') : 'Amigos'}
                     </button>
                     <button onClick={() => setCurrentView(currentView === 'recharge' ? (table ? 'table' : 'lobby') : 'recharge')} className="btn" style={{ background: 'var(--retro-green)', borderColor: 'var(--retro-green)' }}>
@@ -239,7 +261,13 @@ function App() {
                     </div>
                 </div>
             ) : currentView === 'friends' ? (
-                <Friends token={token} />
+                <Friends
+                    token={token}
+                    socket={socket}
+                    table={table}
+                    invites={invites}
+                    onJoinPrivateMatch={handleJoinPrivateMatch}
+                />
             ) : currentView === 'lobby' ? (
                 <Lobby
                     onJoinQuickMatch={handleJoinQuickMatch}

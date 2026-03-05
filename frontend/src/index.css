@@ -285,11 +285,13 @@ body::before {
 .input-bet::-webkit-outer-spin-button,
 .input-bet::-webkit-inner-spin-button {
   -webkit-appearance: none;
+  appearance: none;
   margin: 0;
 }
 
 .input-bet[type=number] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .server-logs {
@@ -355,6 +357,14 @@ body::before {
 @keyframes blink {
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes blinkWhite {
+  50% {
+    background-color: var(--white);
+    color: #000;
+    box-shadow: 0 0 15px var(--white);
   }
 }
 

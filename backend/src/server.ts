@@ -13,6 +13,9 @@ import { BlackjackTable } from './game/BlackjackTable';
 
 const app = express();
 const server = http.createServer(app);
+// Keep track of connected users { userId -> socketId }
+const activeUsers = new Map<number, Set<string>>();
+
 const io = new Server(server, {
     cors: {
         origin: '*',
@@ -89,6 +92,17 @@ const getTableForSocket = (socketId: string) => {
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
+
+    let currentUserId: number | null = null;
+
+    // Register user as online globally
+    socket.on('authenticate', (data: { userId: number }) => {
+        currentUserId = data.userId;
+        if (!activeUsers.has(currentUserId)) {
+            activeUsers.set(currentUserId, new Set());
+        }
+        activeUsers.get(currentUserId)!.add(socket.id);
+    });
 
     // Helper to prevent multiple active sessions
     const kickExistingSession = (userId: number) => {
@@ -246,10 +260,53 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log(`Usuario desconectado: ${socket.id}`);
+        if (currentUserId) {
+            const userSockets = activeUsers.get(currentUserId);
+            if (userSockets) {
+                userSockets.delete(socket.id);
+                if (userSockets.size === 0) activeUsers.delete(currentUserId);
+            }
+        }
+
         const table = getTableForSocket(socket.id);
         if (table) {
             table.removePlayer(socket.id, () => broadcastTableState(table.id));
             broadcastTableState(table.id);
+        }
+    });
+
+    // --- Real-Time Friends Features ---
+
+    socket.on('check_friends_status', (friendIds: number[]) => {
+        const statuses = friendIds.map(id => ({
+            id,
+            isOnline: activeUsers.has(id)
+        }));
+        socket.emit('friends_status_update', statuses);
+    });
+
+    socket.on('send_invite', async (data: { friendId: number, tableCode: string }) => {
+        if (!currentUserId) return;
+        const friendSockets = activeUsers.get(data.friendId);
+
+        if (friendSockets && friendSockets.size > 0) {
+            try {
+                const res = await db.query('SELECT username FROM "User" WHERE id = $1', [currentUserId]);
+                if (res.rows.length > 0) {
+                    const senderName = res.rows[0].username;
+                    friendSockets.forEach(sId => {
+                        io.to(sId).emit('receive_invite', {
+                            senderName,
+                            tableCode: data.tableCode
+                        });
+                    });
+                    socket.emit('server_message', { message: 'Invitación enviada al jugador.' });
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+            socket.emit('server_message', { message: 'El jugador no está en línea.' });
         }
     });
 });
