@@ -181,47 +181,96 @@ export class BlackjackTable {
         const dealerScore = this.dealerHand.getScore();
         const dealerBusted = this.dealerHand.isBusted();
 
+        let totalPot = 0;
+        const validPlayers: Player[] = [];
+
+        // 1. Calculate total pot and filter out busted players
         this.players.forEach(player => {
-            const pHand = player.hand;
-            if (pHand.status === 'busted') {
-                pHand.status = 'lost';
-                return;
-            }
-
-            if (pHand.status === 'blackjack') {
-                if (this.dealerHand.isBlackjack()) {
-                    pHand.status = 'push';
-                } else {
-                    pHand.status = 'won'; // pays 3:2 generally, handled in game loop
-                }
-                return;
-            }
-
-            if (dealerBusted) {
-                pHand.status = 'won';
-            } else if (pHand.getScore() > dealerScore) {
-                pHand.status = 'won';
-            } else if (pHand.getScore() < dealerScore) {
-                pHand.status = 'lost';
+            totalPot += player.hand.betSize;
+            if (player.hand.isBusted()) {
+                player.hand.status = 'lost';
             } else {
-                pHand.status = 'push';
+                validPlayers.push(player);
             }
         });
+
+        // 2. Determine who the "winners" are
+        let winningPlayers: Player[] = [];
+
+        if (validPlayers.length > 0) {
+            if (!dealerBusted) {
+                // If dealer didn't bust, players must beat the dealer's score to even qualify
+                const playersBeatingDealer = validPlayers.filter(p => p.hand.getScore() > dealerScore);
+
+                if (playersBeatingDealer.length > 0) {
+                    // Find the highest score among players who beat the dealer
+                    const highestScore = Math.max(...playersBeatingDealer.map(p => p.hand.getScore()));
+                    winningPlayers = playersBeatingDealer.filter(p => p.hand.getScore() === highestScore);
+                } else {
+                    // Everyone tied or lost to dealer. Dealer keeps the pot.
+                    validPlayers.forEach(p => {
+                        if (p.hand.getScore() === dealerScore) p.hand.status = 'push';
+                        else p.hand.status = 'lost';
+                    });
+                }
+            } else {
+                // Dealer busted. Find the highest score among surviving players
+                const highestScore = Math.max(...validPlayers.map(p => p.hand.getScore()));
+                winningPlayers = validPlayers.filter(p => p.hand.getScore() === highestScore);
+            }
+        }
+
+        // 3. Mark non-winners as lost
+        validPlayers.forEach(p => {
+            if (!winningPlayers.includes(p) && p.hand.status !== 'push') {
+                p.hand.status = 'lost';
+            }
+        });
+
+        // 4. Calculate payouts proportionally for winners
+        const results: { userId: number, payout: number }[] = [];
+
+        if (winningPlayers.length > 0) {
+            // Mark them as 'won'
+            winningPlayers.forEach(p => p.hand.status = 'won');
+
+            if (winningPlayers.length === 1) {
+                // Single winner takes the whole pot
+                results.push({ userId: winningPlayers[0].userId, payout: totalPot });
+            } else {
+                // Multiple ties: proportion based on bet size
+                const totalWinnerBets = winningPlayers.reduce((sum, p) => sum + p.hand.betSize, 0);
+
+                // If by some extreme edge case totalWinnerBets is 0 (free games?), split evenly
+                if (totalWinnerBets === 0) {
+                    const splitPot = Math.floor(totalPot / winningPlayers.length);
+                    winningPlayers.forEach(p => results.push({ userId: p.userId, payout: splitPot }));
+                } else {
+                    winningPlayers.forEach(p => {
+                        // Everyone gets their exact bet back FIRST to ensure no one loses money on a tie where they bet more
+                        let proportionalWin = 0;
+                        const otherPlayersPot = totalPot - totalWinnerBets; // The "dead" money from losers
+
+                        if (otherPlayersPot > 0) {
+                            // Split the dead money proportionally
+                            const sharePercentage = p.hand.betSize / totalWinnerBets;
+                            proportionalWin = Math.floor(otherPlayersPot * sharePercentage);
+                        }
+
+                        const finalPayout = p.hand.betSize + proportionalWin;
+                        results.push({ userId: p.userId, payout: finalPayout });
+                    });
+                }
+            }
+        } else {
+            // Push exact bets back if dealer tied everyone remaining
+            const pushPlayers = validPlayers.filter(p => p.hand.status === 'push');
+            pushPlayers.forEach(p => {
+                results.push({ userId: p.userId, payout: p.hand.betSize });
+            });
+        }
 
         this.state = 'gameOver';
-
-        // Calculate payouts
-        const results: { userId: number, payout: number }[] = [];
-        this.players.forEach(player => {
-            let payout = 0;
-            if (player.hand.status === 'won') payout = player.hand.betSize * 2;
-            else if (player.hand.status === 'blackjack') payout = player.hand.betSize * 2.5;
-            else if (player.hand.status === 'push') payout = player.hand.betSize;
-
-            if (payout > 0) {
-                results.push({ userId: player.userId, payout });
-            }
-        });
 
         if (this.onRoundEnded && results.length > 0) {
             this.onRoundEnded(results);
